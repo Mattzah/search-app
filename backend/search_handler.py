@@ -18,13 +18,6 @@ class SearchHandler:
     def __init__(self):
         self.serpapi_key = os.getenv("SERPAPI_API_KEY")
         self.serpapi_endpoint = "https://serpapi.com/search"
-        
-        # Trusted government domains
-        self.trusted_domains = {
-            '.gov', '.gc.ca', '.ca', '.gov.uk', '.gov.au',
-            'canada.ca', 'ontario.ca', 'toronto.ca', 'statcan.gc.ca',
-            'parl.gc.ca', 'justice.gc.ca', 'fin.gc.ca'
-        }
     
     async def execute_searches(self, queries: List[Any]) -> List[SearchResult]:
         """
@@ -43,7 +36,7 @@ class SearchHandler:
                     logger.error(f"Search failed for query {i}: {response}")
                     continue
                     
-                filtered_results = self._filter_and_rank_results(response)
+                filtered_results = self._filter_results(response)
                 all_results.extend(filtered_results[:5])  # Top 5 per query
         
         # Remove duplicates and limit total results
@@ -52,15 +45,12 @@ class SearchHandler:
     
     async def _search_single_query(self, session: aiohttp.ClientSession, query: Any) -> Dict[str, Any]:
         """
-        Execute a single SerpAPI search query
+        Execute a single SerpAPI search query - removed site filters for comprehensive search
         """
-        # Add site filters for government domains
-        enhanced_query = f"{query.query} (site:.gov OR site:.gc.ca OR site:canada.ca)"
-        
         params = {
             "api_key": self.serpapi_key,
             "engine": "google",
-            "q": enhanced_query,
+            "q": query.query,  # Use original query without site restrictions
             "num": 10,
             "gl": "ca",  # Canada geolocation
             "hl": "en",  # English language
@@ -81,9 +71,9 @@ class SearchHandler:
             logger.error(f"Search request failed: {e}")
             return {"organic_results": []}
     
-    def _filter_and_rank_results(self, search_response: Dict[str, Any]) -> List[SearchResult]:
+    def _filter_results(self, search_response: Dict[str, Any]) -> List[SearchResult]:
         """
-        Filter and rank search results based on domain trust and relevance
+        Filter out spam/low-quality domains, return rest in Google's ranking order
         """
         results = []
         organic_results = search_response.get("organic_results", [])
@@ -99,11 +89,9 @@ class SearchHandler:
             except:
                 continue
             
-            # Score based on domain trustworthiness
-            trust_score = self._calculate_trust_score(domain)
-            
-            # Skip low-trust domains
-            if trust_score == 0:
+            # Skip low-quality domains
+            if self._is_low_quality_domain(domain):
+                logger.debug(f"Filtered out low-quality domain: {domain}")
                 continue
             
             # Skip PDFs and non-web content for now
@@ -117,45 +105,73 @@ class SearchHandler:
                 domain=domain
             ))
         
-        # Sort by trust score (higher is better)
-        results.sort(key=lambda x: self._calculate_trust_score(x.domain), reverse=True)
+        # Return in Google's original ranking order (no re-sorting)
+        logger.info(f"Filtered {len(results)} quality results from {len(organic_results)} total")
         return results
     
-    def _calculate_trust_score(self, domain: str) -> int:
+    def _is_low_quality_domain(self, domain: str) -> bool:
         """
-        Calculate trust score for a domain (higher = more trusted)
+        Filter out obvious spam/low-quality sites
         """
         domain = domain.lower()
         
-        # Highest trust: Official government domains
-        if any(trusted in domain for trusted in ['.gov', '.gc.ca', 'canada.ca']):
-            return 10
-            
-        # High trust: Provincial/municipal government
-        if any(trusted in domain for trusted in ['.ca', 'ontario.ca', 'toronto.ca']):
-            return 8
-            
-        # Medium trust: Academic and established news
-        if any(trusted in domain for trusted in ['.edu', '.ac.', 'statcan', 'parl.gc.ca']):
-            return 6
-            
-        # Low trust: Commercial news sites
-        if any(trusted in domain for trusted in ['cbc.ca', 'globalnews.ca', 'ctvnews.ca']):
-            return 4
-            
-        # No trust: Everything else
-        return 0
+        # Spam indicators
+        spam_keywords = [
+            'clickbait', 'viral', 'buzz', 'listicle', 'top10', 'bestof',
+            'casino', 'poker', 'gambling', 'betting', 'slots',
+            'dating', 'adult', 'xxx', 'porn', 'sex',
+            'freebie', 'coupon', 'deal', 'cheap', 'discount',
+            'scam', 'fake', 'fraud', 'spam', 'phishing',
+            'malware', 'virus', 'hack', 'crack', 'pirate',
+            'get-rich', 'make-money', 'earn-cash', 'free-money'
+        ]
+        
+        # Check for spam keywords in domain
+        if any(spam in domain for spam in spam_keywords):
+            return True
+        
+        # Check for suspicious patterns
+        suspicious_patterns = [
+            # Domains with excessive numbers
+            len([c for c in domain if c.isdigit()]) > len(domain) * 0.3,
+            # Domains with excessive hyphens
+            domain.count('-') > 3,
+            # Very short domains that are likely parked
+            len(domain.replace('.', '').replace('-', '')) < 4,
+            # Domains with suspicious TLDs (add more as needed)
+            any(domain.endswith(tld) for tld in ['.tk', '.ml', '.ga', '.cf'])
+        ]
+        
+        return any(suspicious_patterns)
     
     def _deduplicate_results(self, results: List[SearchResult]) -> List[SearchResult]:
         """
-        Remove duplicate URLs and similar titles
+        Remove duplicate URLs and very similar titles
         """
         seen_urls = set()
+        seen_titles = set()
         unique_results = []
         
         for result in results:
-            if result.url not in seen_urls:
-                seen_urls.add(result.url)
-                unique_results.append(result)
+            # Skip exact URL duplicates
+            if result.url in seen_urls:
+                continue
+                
+            # Skip very similar titles (basic deduplication)
+            title_words = set(result.title.lower().split())
+            is_similar = False
+            
+            for seen_title in seen_titles:
+                seen_words = set(seen_title.lower().split())
+                if len(title_words & seen_words) / len(title_words | seen_words) > 0.8:
+                    is_similar = True
+                    break
+            
+            if is_similar:
+                continue
+                
+            seen_urls.add(result.url)
+            seen_titles.add(result.title)
+            unique_results.append(result)
         
         return unique_results
