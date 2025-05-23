@@ -16,8 +16,8 @@ class SearchResult:
 
 class SearchHandler:
     def __init__(self):
-        self.bing_api_key = os.getenv("BING_SEARCH_API_KEY")
-        self.bing_endpoint = "https://api.bing.microsoft.com/v7.0/search"
+        self.serpapi_key = os.getenv("SERPAPI_API_KEY")
+        self.serpapi_endpoint = "https://serpapi.com/search"
         
         # Trusted government domains
         self.trusted_domains = {
@@ -52,49 +52,45 @@ class SearchHandler:
     
     async def _search_single_query(self, session: aiohttp.ClientSession, query: Any) -> Dict[str, Any]:
         """
-        Execute a single Bing search query
+        Execute a single SerpAPI search query
         """
-        headers = {
-            "Ocp-Apim-Subscription-Key": self.bing_api_key,
-            "User-Agent": "Mozilla/5.0 (compatible; GovernmentDocBot/1.0)"
-        }
-        
         # Add site filters for government domains
         enhanced_query = f"{query.query} (site:.gov OR site:.gc.ca OR site:canada.ca)"
         
         params = {
+            "api_key": self.serpapi_key,
+            "engine": "google",
             "q": enhanced_query,
-            "count": 10,
-            "offset": 0,
-            "mkt": "en-CA",  # Canadian market for better gov results
-            "safeSearch": "Strict",
-            "textDecorations": False,
-            "textFormat": "Raw"
+            "num": 10,
+            "gl": "ca",  # Canada geolocation
+            "hl": "en",  # English language
+            "safe": "active",
+            "output": "json"
         }
         
         try:
-            async with session.get(self.bing_endpoint, headers=headers, params=params) as response:
+            async with session.get(self.serpapi_endpoint, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
                     return data
                 else:
-                    logger.error(f"Bing API error: {response.status}")
-                    return {"webPages": {"value": []}}
+                    logger.error(f"SerpAPI error: {response.status}")
+                    return {"organic_results": []}
                     
         except Exception as e:
             logger.error(f"Search request failed: {e}")
-            return {"webPages": {"value": []}}
+            return {"organic_results": []}
     
     def _filter_and_rank_results(self, search_response: Dict[str, Any]) -> List[SearchResult]:
         """
         Filter and rank search results based on domain trust and relevance
         """
         results = []
-        web_pages = search_response.get("webPages", {}).get("value", [])
+        organic_results = search_response.get("organic_results", [])
         
-        for item in web_pages:
-            url = item.get("url", "")
-            title = item.get("name", "")
+        for item in organic_results:
+            url = item.get("link", "")
+            title = item.get("title", "")
             snippet = item.get("snippet", "")
             
             # Parse domain

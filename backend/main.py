@@ -138,7 +138,7 @@ if __name__ == "__main__":
     import uvicorn
     
     # Ensure required environment variables are set
-    required_env_vars = ["OPENAI_API_KEY", "BING_SEARCH_API_KEY"]
+    required_env_vars = ["OPENAI_API_KEY", "SERPAPI_API_KEY"]
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     
     if missing_vars:

@@ -5,29 +5,9 @@ from urllib.parse import urljoin, urlparse
 import re
 from datetime import datetime
 import logging
+from bs4 import BeautifulSoup, Comment
 
 logger = logging.getLogger(__name__)
-
-# Try importing optional dependencies
-READABILITY_AVAILABLE = False
-HTML2TEXT_AVAILABLE = False
-
-try:
-    from readability import Document
-    READABILITY_AVAILABLE = True
-except ImportError:
-    logger.info("readability-lxml not available, using BeautifulSoup fallback")
-    Document = None
-
-try:
-    import html2text
-    HTML2TEXT_AVAILABLE = True
-except ImportError:
-    logger.info("html2text not available, using basic text extraction")
-    html2text = None
-
-# BeautifulSoup is required
-from bs4 import BeautifulSoup, Comment
 
 class ExtractedContent:
     def __init__(self, title: str, url: str, content: str, domain: str, word_count: int):
@@ -117,42 +97,15 @@ class ContentExtractor:
     
     def _extract_clean_content(self, html_content: str, url: str) -> Optional[Dict[str, str]]:
         """
-        Extract clean text content from HTML using readability and BeautifulSoup
+        Extract clean text content from HTML using BeautifulSoup only
         """
         try:
-            # Method 1: Try readability-lxml (best for article extraction)
-            if READABILITY_AVAILABLE and Document:
-                doc = Document(html_content)
-                title = doc.title()
-                content_html = doc.summary()
-                
-                # Convert to text
-                if HTML2TEXT_AVAILABLE and html2text:
-                    h = html2text.HTML2Text()
-                    h.ignore_links = True
-                    h.ignore_images = True
-                    h.body_width = 0
-                    content_text = h.handle(content_html)
-                else:
-                    # Fallback: strip HTML tags
-                    soup_content = BeautifulSoup(content_html, 'html.parser')
-                    content_text = soup_content.get_text(separator=' ', strip=True)
-                
-                # Clean up text
-                content_text = self._clean_text(content_text)
-                
-                if len(content_text) >= self.min_content_length:
-                    return {
-                        'title': title.strip(),
-                        'content': content_text
-                    }
-            
-            # Method 2: BeautifulSoup fallback
             soup = BeautifulSoup(html_content, 'html.parser')
             
             # Remove unwanted elements
             for element in soup(['script', 'style', 'nav', 'header', 'footer', 
-                               'aside', 'advertisement', 'ads']):
+                               'aside', 'advertisement', 'ads', 'form', 'iframe',
+                               'noscript', 'svg', 'canvas']):
                 element.decompose()
             
             # Remove comments
@@ -163,10 +116,23 @@ class ContentExtractor:
             title_elem = soup.find('title')
             title = title_elem.get_text().strip() if title_elem else "Untitled"
             
-            # Extract main content (try multiple selectors)
+            # Clean up title
+            title = re.sub(r'\s+', ' ', title)
+            if len(title) > 100:
+                title = title[:100] + "..."
+            
+            # Extract main content (try multiple selectors in order of preference)
             content_selectors = [
-                'main', 'article', '.content', '#content', '.main-content',
-                '.article-content', '.post-content', '[role="main"]'
+                'main',
+                'article', 
+                '[role="main"]',
+                '.content',
+                '#content',
+                '.main-content',
+                '.article-content',
+                '.post-content',
+                '.entry-content',
+                '.page-content'
             ]
             
             content_text = ""
@@ -176,10 +142,13 @@ class ContentExtractor:
                     content_text = elements[0].get_text(separator=' ', strip=True)
                     break
             
-            # Fallback: extract from body
-            if not content_text:
+            # Fallback: extract from body, but remove common noise
+            if not content_text or len(content_text) < self.min_content_length:
                 body = soup.find('body')
                 if body:
+                    # Remove navigation, sidebars, etc.
+                    for noise in body.select('nav, .nav, .sidebar, .menu, .navigation, .breadcrumbs, .footer, .header'):
+                        noise.decompose()
                     content_text = body.get_text(separator=' ', strip=True)
             
             content_text = self._clean_text(content_text)
@@ -191,7 +160,7 @@ class ContentExtractor:
                 }
             
         except Exception as e:
-            logger.error(f"Content extraction error: {e}")
+            logger.error(f"Content extraction error for {url}: {e}")
         
         return None
     
@@ -202,19 +171,37 @@ class ContentExtractor:
         # Remove excessive whitespace
         text = re.sub(r'\s+', ' ', text)
         
-        # Remove common navigation/footer text
+        # Remove common navigation/footer text patterns
         patterns_to_remove = [
             r'Skip to main content',
+            r'Skip to content',
             r'Subscribe to newsletter',
-            r'Follow us on',
-            r'Copyright \d{4}',
-            r'All rights reserved',
+            r'Follow us on \w+',
+            r'Copyright \d{4}.*?(?:\.|$)',
+            r'All rights reserved.*?(?:\.|$)',
             r'Privacy Policy',
             r'Terms of Service',
+            r'Cookie Policy',
+            r'Sign up for.*?newsletter',
+            r'Share this.*?(?:\.|$)',
+            r'Print this page',
+            r'Email this page',
+            r'Last updated:.*?(?:\.|$)',
+            r'Date modified:.*?(?:\.|$)'
         ]
         
         for pattern in patterns_to_remove:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+        
+        # Remove URLs and email addresses
+        text = re.sub(r'https?://\S+', '', text)
+        text = re.sub(r'\S+@\S+\.\S+', '', text)
+        
+        # Remove excessive punctuation
+        text = re.sub(r'[^\w\s.,;:!?()-]', ' ', text)
+        
+        # Final whitespace cleanup
+        text = re.sub(r'\s+', ' ', text)
         
         # Limit length
         if len(text) > self.max_content_length:
@@ -228,23 +215,34 @@ class ContentExtractor:
         """
         # Minimum word count
         if content.word_count < 100:
+            logger.debug(f"Content too short: {content.word_count} words from {content.url}")
             return False
         
         # Check for excessive repetition (sign of boilerplate)
         words = content.content.lower().split()
         unique_words = set(words)
-        if len(unique_words) / len(words) < 0.3:  # Less than 30% unique words
+        uniqueness = len(unique_words) / len(words) if words else 0
+        
+        if uniqueness < 0.3:  # Less than 30% unique words
+            logger.debug(f"Content too repetitive: {uniqueness:.2f} uniqueness from {content.url}")
             return False
         
         # Check for government/policy relevant keywords
         relevant_keywords = [
             'policy', 'government', 'minister', 'department', 'regulation',
             'legislation', 'parliament', 'federal', 'provincial', 'municipal',
-            'public', 'service', 'report', 'budget', 'strategy', 'framework'
+            'public', 'service', 'report', 'budget', 'strategy', 'framework',
+            'initiative', 'program', 'act', 'bill', 'committee', 'council',
+            'administration', 'agency', 'authority', 'commission'
         ]
         
         content_lower = content.content.lower()
         keyword_count = sum(1 for keyword in relevant_keywords if keyword in content_lower)
         
         # Should have at least 2 relevant keywords
-        return keyword_count >= 2
+        if keyword_count < 2:
+            logger.debug(f"Content not relevant: {keyword_count} keywords from {content.url}")
+            return False
+        
+        logger.debug(f"Quality content: {content.word_count} words, {uniqueness:.2f} uniqueness, {keyword_count} keywords from {content.url}")
+        return True
