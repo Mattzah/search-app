@@ -28,6 +28,13 @@ class ContentExtractor:
         """
         Extract content from multiple URLs concurrently
         """
+        # ADD: Input logging
+        logger.info(f"CONTENT_EXTRACTOR INPUT - {len(search_results)} URLs:")
+        for i, result in enumerate(search_results[:5]):  # Log first 5
+            logger.info(f"  {i+1}. [{result.domain}] {result.url}")
+        if len(search_results) > 5:
+            logger.info(f"  ... and {len(search_results) - 5} more URLs")
+        
         extracted_content = []
         
         async with aiohttp.ClientSession(timeout=self.timeout) as session:
@@ -45,7 +52,6 @@ class ContentExtractor:
         quality_content = [content for content in extracted_content 
                           if self._is_quality_content(content)]
         
-        logger.info(f"Extracted {len(quality_content)} quality articles from {len(search_results)} URLs")
         return quality_content
     
     async def _extract_single_url(self, session: aiohttp.ClientSession, search_result: Any) -> Optional[ExtractedContent]:
@@ -80,13 +86,21 @@ class ContentExtractor:
                 extracted = self._extract_clean_content(html_content, url)
                 
                 if extracted:
+                    word_count = len(extracted['content'].split())
+                    
+                    # ADD: Success logging with content preview
+                    logger.info(f"EXTRACTED SUCCESS: {url} - {word_count} words - {html_content}")
+                    logger.debug(f"CONTENT_PREVIEW: {extracted['content'][:200]}...")
+                    
                     return ExtractedContent(
                         title=extracted['title'],
                         url=url,
                         content=extracted['content'],
                         domain=search_result.domain,
-                        word_count=len(extracted['content'].split())
+                        word_count=word_count
                     )
+                else:
+                    logger.warning(f"EXTRACTION FAILED: Could not extract content from {url}")
         
         except asyncio.TimeoutError:
             logger.warning(f"Timeout extracting content from {url}")
@@ -154,10 +168,13 @@ class ContentExtractor:
             content_text = self._clean_text(content_text)
             
             if len(content_text) >= self.min_content_length:
+                logger.debug(f"CONTENT_EXTRACTION SUCCESS: {len(content_text)} chars from {url}")
                 return {
                     'title': title,
                     'content': content_text
                 }
+            else:
+                logger.debug(f"CONTENT_EXTRACTION FAILED: Only {len(content_text)} chars from {url}")
             
         except Exception as e:
             logger.error(f"Content extraction error for {url}: {e}")

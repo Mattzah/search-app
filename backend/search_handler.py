@@ -23,6 +23,7 @@ class SearchHandler:
         """
         Execute all search queries concurrently and return filtered results
         """
+        
         all_results = []
         
         async with aiohttp.ClientSession() as session:
@@ -41,12 +42,19 @@ class SearchHandler:
         
         # Remove duplicates and limit total results
         unique_results = self._deduplicate_results(all_results)
+        
+        # ADD: Output logging
+        logger.info(f"SEARCH_HANDLER OUTPUT - {len(unique_results)} unique results:")
+        for i, result in enumerate(unique_results[:15]):  # Log all 15 results
+            logger.info(f"  {i+1}. [{result.domain}] {result.title}")
+        
         return unique_results[:15]  # Max 15 total results
     
     async def _search_single_query(self, session: aiohttp.ClientSession, query: Any) -> Dict[str, Any]:
         """
         Execute a single SerpAPI search query - removed site filters for comprehensive search
         """
+        
         params = {
             "api_key": self.serpapi_key,
             "engine": "google",
@@ -62,6 +70,7 @@ class SearchHandler:
             async with session.get(self.serpapi_endpoint, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
+                    
                     return data
                 else:
                     logger.error(f"SerpAPI error: {response.status}")
@@ -77,6 +86,8 @@ class SearchHandler:
         """
         results = []
         organic_results = search_response.get("organic_results", [])
+        
+        logger.debug(f"FILTERING: Processing {len(organic_results)} organic results")
         
         for item in organic_results:
             url = item.get("link", "")
@@ -96,6 +107,7 @@ class SearchHandler:
             
             # Skip PDFs and non-web content for now
             if url.lower().endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx')):
+                logger.debug(f"Filtered out document: {url}")
                 continue
                 
             results.append(SearchResult(
@@ -106,7 +118,6 @@ class SearchHandler:
             ))
         
         # Return in Google's original ranking order (no re-sorting)
-        logger.info(f"Filtered {len(results)} quality results from {len(organic_results)} total")
         return results
     
     def _is_low_quality_domain(self, domain: str) -> bool:
@@ -148,6 +159,8 @@ class SearchHandler:
         """
         Remove duplicate URLs and very similar titles
         """
+        logger.debug(f"DEDUPLICATION: Processing {len(results)} results")
+        
         seen_urls = set()
         seen_titles = set()
         unique_results = []
@@ -155,6 +168,7 @@ class SearchHandler:
         for result in results:
             # Skip exact URL duplicates
             if result.url in seen_urls:
+                logger.debug(f"Filtered duplicate URL: {result.url}")
                 continue
                 
             # Skip very similar titles (basic deduplication)
@@ -165,6 +179,7 @@ class SearchHandler:
                 seen_words = set(seen_title.lower().split())
                 if len(title_words & seen_words) / len(title_words | seen_words) > 0.8:
                     is_similar = True
+                    logger.debug(f"Filtered similar title: {result.title}")
                     break
             
             if is_similar:
@@ -174,4 +189,5 @@ class SearchHandler:
             seen_titles.add(result.title)
             unique_results.append(result)
         
+        logger.info(f"DEDUPLICATION: {len(unique_results)} unique results from {len(results)} total")
         return unique_results

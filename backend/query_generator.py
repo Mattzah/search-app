@@ -20,6 +20,9 @@ class QueryGenerator:
         Generate 3 targeted search queries using GPT-4o-mini
         """
         
+        # ADD: Input logging
+        logger.info(f"QUERY_GEN INPUT - Subject: '{subject}', Purpose: '{purpose}', Jurisdiction: '{jurisdiction}'")
+        
         jurisdiction_context = f" in {jurisdiction}" if jurisdiction else ""
         
         prompt = f"""
@@ -44,8 +47,8 @@ Return as JSON array with objects containing "query" and "category" fields.
 
 Example format:
 [
-  {{"query": "housing affordability policy framework Canada 2023", "category": "background"}},
-  {{"query": "recent housing initiatives federal government 2024", "category": "recent"}},
+  {{"query": "housing affordability policy framework Canada 2025", "category": "background"}},
+  {{"query": "recent housing initiatives federal government 2025", "category": "recent"}},
   {{"query": "CMHC housing strategy report government", "category": "policy"}}
 ]
 
@@ -64,6 +67,9 @@ Generate queries now:
             )
             
             content = response.choices[0].message.content.strip()
+            
+            # ADD: Raw LLM output logging
+            logger.info(f"QUERY_GEN LLM_OUTPUT: {content}")
             
             # Extract JSON from response if wrapped in markdown
             if "```json" in content:
@@ -85,8 +91,12 @@ Generate queries now:
             if len(queries) != 3:
                 logger.warning(f"Expected 3 queries, got {len(queries)}. Using fallback method.")
                 return self._generate_fallback_queries(subject, purpose, jurisdiction)
-                
-            logger.info(f"Generated {len(queries)} queries successfully")
+            
+            # ADD: Final output logging
+            logger.info(f"QUERY_GEN OUTPUT - Generated {len(queries)} queries:")
+            for i, query in enumerate(queries):
+                logger.info(f"  {i+1}. [{query.category}] {query.query}")
+            
             return queries
             
         except json.JSONDecodeError as e:
@@ -108,7 +118,7 @@ Generate queries now:
                 category="background"
             ),
             SearchQuery(
-                query=f"{subject} recent news updates 2024{jurisdiction_suffix}",
+                query=f"{subject} recent news updates 2025{jurisdiction_suffix}",
                 category="recent"
             ),
             SearchQuery(
@@ -118,4 +128,9 @@ Generate queries now:
         ]
         
         logger.info("Using fallback query generation")
+        # ADD: Fallback output logging
+        logger.info(f"QUERY_GEN FALLBACK OUTPUT - Generated {len(queries)} queries:")
+        for i, query in enumerate(queries):
+            logger.info(f"  {i+1}. [{query.category}] {query.query}")
+        
         return queries
