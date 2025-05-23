@@ -18,7 +18,7 @@ class SourceSummary(BaseModel):
 class Summarizer:
     def __init__(self):
         self.client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.max_chunk_size = 4000  # Characters per chunk for GPT-4o
+        self.max_chunk_size = 4000  # Characters per chunk for GPT-4o-mini
         
     async def summarize_sources(self, extracted_content: List[Any]) -> List[SourceSummary]:
         """
@@ -49,7 +49,7 @@ class Summarizer:
     
     async def _summarize_single_source(self, content: Any) -> SourceSummary:
         """
-        Summarize a single source using GPT-4o
+        Summarize a single source using GPT-4o-mini
         """
         try:
             # Chunk content if too long
@@ -113,7 +113,7 @@ Return only the bullet points, starting each with "•":
 
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are an expert policy analyst who creates concise, factual summaries for government document drafters. Focus on specific facts, figures, and actionable information."},
                     {"role": "user", "content": prompt}
@@ -187,7 +187,7 @@ Return only the consolidated bullet points, starting each with "•":
 
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You consolidate multiple summaries into the most important key points."},
                     {"role": "user", "content": prompt}
@@ -248,7 +248,7 @@ Return only the bullet points, starting each with "•":
 
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a senior policy analyst creating executive-level summaries for government document drafters. Focus on synthesis, themes, and actionable insights."},
                     {"role": "user", "content": prompt}
