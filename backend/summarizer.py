@@ -4,16 +4,16 @@ from typing import List, Dict, Any
 import asyncio
 import logging
 from datetime import datetime
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-class SourceSummary:
-    def __init__(self, title: str, url: str, source_summary: List[str], domain: str):
-        self.title = title
-        self.url = url
-        self.source_summary = source_summary
-        self.domain = domain
-        self.date_accessed = datetime.utcnow().isoformat()
+class SourceSummary(BaseModel):
+    title: str
+    url: str
+    source_summary: List[str]
+    domain: str
+    date_accessed: str
 
 class Summarizer:
     def __init__(self):
@@ -71,7 +71,8 @@ class Summarizer:
                 title=content.title,
                 url=content.url,
                 source_summary=summary_points,
-                domain=content.domain
+                domain=content.domain,
+                date_accessed=datetime.utcnow().isoformat()
             )
             
         except Exception as e:
@@ -81,7 +82,8 @@ class Summarizer:
                 title=content.title,
                 url=content.url,
                 source_summary=[f"Summary unavailable - processing error"],
-                domain=content.domain
+                domain=content.domain,
+                date_accessed=datetime.utcnow().isoformat()
             )
     
     async def _summarize_chunk(self, text: str, title: str, domain: str) -> List[str]:

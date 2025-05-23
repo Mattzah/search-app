@@ -9,12 +9,17 @@ from urllib.parse import urljoin, urlparse
 import re
 from datetime import datetime
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import helper modules (we'll create these)
 from search_handler import SearchHandler
 from content_extractor import ContentExtractor
 from summarizer import Summarizer
-from query_generator import QueryGenerator
+from query_generator import QueryGenerator, SearchQuery
+from summarizer import SourceSummary
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,17 +41,6 @@ class DocumentRequest(BaseModel):
     subject: str = Field(..., min_length=1, description="The main topic of the document")
     purpose: str = Field(..., min_length=1, description="The purpose of the document")
     jurisdiction: Optional[str] = Field(None, description="e.g. 'Canada', 'Ontario', 'City of Toronto'")
-
-class SearchQuery(BaseModel):
-    query: str
-    category: str  # 'background', 'recent', 'policy'
-
-class SourceSummary(BaseModel):
-    title: str
-    url: str
-    source_summary: List[str]  # 3-4 bullet points
-    domain: str
-    date_accessed: str
 
 class SearchResponse(BaseModel):
     queries: List[SearchQuery]
@@ -145,4 +139,4 @@ if __name__ == "__main__":
         logger.error(f"Missing required environment variables: {missing_vars}")
         exit(1)
     
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
